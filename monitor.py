@@ -389,6 +389,16 @@ def run() -> int:
             log.info("Loaded: url=%s  title=%r", page.url, page.title())
             page.screenshot(path=f"{SHOT_DIR}/01_landing.png")
 
+            # The site shows an intro SweetAlert2 overlay to fresh browser sessions
+            # (no cookies). Dismiss it so it doesn't block the confirm button.
+            overlay = page.query_selector(".swal2-container")
+            if overlay and overlay.is_visible():
+                log.info("Intro overlay detected on page load — dismissing")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(600)
+            else:
+                log.debug("No intro overlay detected")
+
             for attempt in range(1, CAPTCHA_RETRIES + 1):
                 log.info("--- CAPTCHA attempt %d / %d ---", attempt, CAPTCHA_RETRIES)
 
@@ -407,10 +417,10 @@ def run() -> int:
                     page.reload(wait_until="domcontentloaded")
                     continue
 
-                # Submit
+                # Submit — use JS click so any residual overlay can't block it
                 page.fill("#mailConfirmCodeControl", code)
-                log.info("Filled input, clicking submit...")
-                page.click("#confirmationbtn")
+                log.info("Filled input, submitting via JS click...")
+                page.evaluate("document.querySelector('#confirmationbtn').click()")
 
                 # Wait for the page response (form POST causes a navigation)
                 try:

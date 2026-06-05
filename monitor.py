@@ -318,18 +318,23 @@ def trip_selects(page):
     return out
 
 
+def _norm(s: str) -> str:
+    """Collapse all whitespace (spaces, newlines, tabs) to a single space."""
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
 def select_by_text(handle, wanted: str) -> bool:
     options = handle.eval_on_selector_all(
         "option", "els => els.map(e => e.textContent.trim()).filter(Boolean)")
     log.info("    available options: %s", options)
-    w = wanted.strip().lower()
+    w = _norm(wanted)
     for opt in options:
-        if opt.strip().lower() == w:
+        if _norm(opt) == w:
             handle.select_option(label=opt)
             log.info("    selected (exact): %r", opt)
             return True
     for opt in options:
-        if w in opt.strip().lower():
+        if w in _norm(opt):
             handle.select_option(label=opt)
             log.info("    selected (fuzzy '%s' -> %r)", wanted, opt)
             return True

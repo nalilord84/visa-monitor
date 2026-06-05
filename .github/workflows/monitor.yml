@@ -4,7 +4,7 @@ on:
   schedule:
     # Every 20 minutes. GitHub often delays scheduled runs by a few minutes,
     # which is fine here. The script adds its own random jitter on top.
-    - cron: "*/20 * * * *"
+    - cron: "*/20 3-21 * * *"
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
 concurrency:

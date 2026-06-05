@@ -31,18 +31,23 @@ jobs:
         env:
           # --- Secrets (Settings -> Secrets and variables -> Actions -> Secrets) ---
           ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
-          # Telegram channel (optional if you use email)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Email channel (optional if you use Telegram). For Gmail use an App Password.
           SMTP_USER:          ${{ secrets.SMTP_USER }}
           SMTP_PASS:          ${{ secrets.SMTP_PASS }}
-          SMTP_HOST:          ${{ vars.SMTP_HOST  || 'smtp.gmail.com' }}
-          SMTP_PORT:          ${{ vars.SMTP_PORT  || '587' }}
-          EMAIL_FROM:         ${{ vars.EMAIL_FROM }}
-          EMAIL_TO:           ${{ vars.EMAIL_TO }}
-          # --- Config (Settings -> ... -> Variables). Defaults used if unset. ---
-          LOG_LEVEL:            ${{ vars.LOG_LEVEL            || 'INFO' }}
+          # --- Variables (Settings -> Secrets and variables -> Actions -> Variables) ---
+          # Notification
+          SMTP_HOST:            ${{ vars.SMTP_HOST            || 'smtp.gmail.com' }}
+          SMTP_PORT:            ${{ vars.SMTP_PORT            || '587' }}
+          EMAIL_FROM:           ${{ vars.EMAIL_FROM }}
+          EMAIL_TO:             ${{ vars.EMAIL_TO }}
+          # Timing (set MAX_JITTER_SEC=0 to disable jitter during debugging)
+          MAX_JITTER_SEC:       ${{ vars.MAX_JITTER_SEC       || '240' }}
+          NAV_TIMEOUT_MS:       ${{ vars.NAV_TIMEOUT_MS       || '45000' }}
+          # CAPTCHA
+          CAPTCHA_RETRIES:      ${{ vars.CAPTCHA_RETRIES      || '3' }}
+          VISION_MODEL:         ${{ vars.VISION_MODEL         || 'claude-haiku-4-5-20251001' }}
+          # Booking config
           THRESHOLD_DATE:       ${{ vars.THRESHOLD_DATE       || '30.06.2026' }}
           SEL_APPLICATION_TYPE: ${{ vars.SEL_APPLICATION_TYPE || 'Schengen Visa' }}
           SEL_COUNTRY:          ${{ vars.SEL_COUNTRY          || 'Germany' }}
@@ -50,6 +55,8 @@ jobs:
           SEL_OFFICE:           ${{ vars.SEL_OFFICE           || 'Moscow' }}
           SEL_SERVICE_TYPE:     ${{ vars.SEL_SERVICE_TYPE     || 'NORMAL' }}
           SEL_APPLICANTS:       ${{ vars.SEL_APPLICANTS       || '1 applicant' }}
+          # Logging
+          LOG_LEVEL:            ${{ vars.LOG_LEVEL            || 'INFO' }}
         run: python monitor.py
 
       - name: Upload screenshots

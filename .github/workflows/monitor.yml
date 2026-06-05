@@ -1,0 +1,62 @@
+name: visa-monitor
+
+on:
+  schedule:
+    # Every 20 minutes. GitHub often delays scheduled runs by a few minutes,
+    # which is fine here. The script adds its own random jitter on top.
+    - cron: "*/20 * * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+concurrency:
+  group: visa-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run monitor
+        env:
+          # --- Secrets (Settings -> Secrets and variables -> Actions -> Secrets) ---
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          # Telegram channel (optional if you use email)
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Email channel (optional if you use Telegram). For Gmail use an App Password.
+          SMTP_USER:          ${{ secrets.SMTP_USER }}
+          SMTP_PASS:          ${{ secrets.SMTP_PASS }}
+          SMTP_HOST:          ${{ vars.SMTP_HOST  || 'smtp.gmail.com' }}
+          SMTP_PORT:          ${{ vars.SMTP_PORT  || '587' }}
+          EMAIL_FROM:         ${{ vars.EMAIL_FROM }}
+          EMAIL_TO:           ${{ vars.EMAIL_TO }}
+          # --- Config (Settings -> ... -> Variables). Defaults used if unset. ---
+          LOG_LEVEL:            ${{ vars.LOG_LEVEL            || 'INFO' }}
+          THRESHOLD_DATE:       ${{ vars.THRESHOLD_DATE       || '30.06.2026' }}
+          SEL_APPLICATION_TYPE: ${{ vars.SEL_APPLICATION_TYPE || 'Schengen Visa' }}
+          SEL_COUNTRY:          ${{ vars.SEL_COUNTRY          || 'Germany' }}
+          SEL_CITY_RESIDENCE:   ${{ vars.SEL_CITY_RESIDENCE   || 'Moscow Region' }}
+          SEL_OFFICE:           ${{ vars.SEL_OFFICE           || 'Moscow' }}
+          SEL_SERVICE_TYPE:     ${{ vars.SEL_SERVICE_TYPE     || 'NORMAL' }}
+          SEL_APPLICANTS:       ${{ vars.SEL_APPLICANTS       || '1 applicant' }}
+        run: python monitor.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: ignore
+          retention-days: 3

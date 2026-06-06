@@ -462,6 +462,26 @@ def run() -> int:
         # ---- Stage 2: dropdowns -------------------------------------------- #
         with step("fill dropdowns"):
             for i, (field_name, wanted) in enumerate(SELECTIONS):
+                # Dropdowns 2-6 are populated by AJAX after the previous one is
+                # selected. networkidle is unreliable — instead, wait explicitly
+                # for options.length > 1 (more than just the placeholder) before
+                # reading the dropdown.
+                if i >= 1:
+                    log.info("    Waiting for dropdown %d/%d [%s] to be populated...",
+                             i + 1, len(SELECTIONS), field_name)
+                    try:
+                        page.wait_for_function(
+                            f"""() => {{
+                                const sel = Array.from(document.querySelectorAll('select'))
+                                    .filter(s => s.id !== 'language' && s.name !== 'language');
+                                return sel.length > {i} && sel[{i}].options.length > 1;
+                            }}""",
+                            timeout=15000,
+                        )
+                        log.info("    Dropdown %d ready", i + 1)
+                    except PWTimeout:
+                        log.warning("    Dropdown %d did not populate within 15s; proceeding anyway", i + 1)
+
                 selects = trip_selects(page)
                 log.info("Dropdown %d/%d [%s] want=%r  (%d selects on page)",
                          i + 1, len(SELECTIONS), field_name, wanted, len(selects))
@@ -470,12 +490,9 @@ def run() -> int:
                         f"Only {len(selects)} dropdowns found, need {len(SELECTIONS)}. "
                         "See screenshots/03_trip_form.png")
                 select_by_text(selects[i], wanted)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=15000)
-                except PWTimeout:
-                    pass
-                time.sleep(1.5)
-            page.wait_for_timeout(2500)
+                time.sleep(0.5)  # brief pause for change event to propagate
+
+            page.wait_for_timeout(3000)
             page.screenshot(path=f"{SHOT_DIR}/04_after_selections.png", full_page=True)
 
         # ---- Stage 3: read dates ------------------------------------------- #

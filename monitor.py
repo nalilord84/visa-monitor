@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from email.message import EmailMessage
 
 import requests
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 from anthropic import Anthropic
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -221,18 +221,23 @@ def preprocess_captcha(b64_png: str, attempt: int) -> str:
     model actually saw.
     """
     raw_bytes = base64.b64decode(b64_png)
-    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    img = Image.open(io.BytesIO(raw_bytes)).convert("L")  # grayscale
 
     log.info("    CAPTCHA raw size: %dx%d px", img.width, img.height)
+
+    # Remove the salt-and-pepper dot noise that confuses OCR (median filter is
+    # ideal for this kind of speckle while preserving digit edges)
+    img = img.filter(ImageFilter.MedianFilter(size=3))
 
     # Scale up 3× with high-quality resampling
     img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
 
-    # Boost contrast so the outlined characters pop against the noisy background
-    img = ImageEnhance.Contrast(img).enhance(2.5)
+    # Boost contrast so digit outlines separate from the 3D drop-shadow
+    img = ImageEnhance.Contrast(img).enhance(2.0)
     img = ImageEnhance.Sharpness(img).enhance(2.0)
+    img = img.convert("RGB")
 
-    log.info("    CAPTCHA after preprocessing: %dx%d px", img.width, img.height)
+    log.info("    CAPTCHA after preprocessing: %dx%d px (denoised)", img.width, img.height)
 
     # Save for debugging (visible in the screenshots artifact)
     out_path = f"{SHOT_DIR}/captcha_{attempt}.png"

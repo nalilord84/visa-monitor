@@ -257,18 +257,17 @@ def solve_captcha(b64_png: str) -> str:
             {"type": "image",
              "source": {"type": "base64", "media_type": "image/png", "data": b64_png}},
             {"type": "text", "text": (
-                "This is a CAPTCHA image with exactly 4 characters using a bold "
-                "outlined/hollow font on a noisy dotted background. "
-                "Characters are uppercase letters (A-Z) or digits (0-9). "
-                "Reply with ONLY the 4 characters in uppercase — no spaces, "
-                "no explanation, nothing else. "
-                "Watch out for these common confusions: "
-                "0 vs O, 1 vs I vs L, 2 vs Z, 5 vs S, 6 vs G, 8 vs B."
+                "This CAPTCHA contains exactly 4 digits. "
+                "IMPORTANT: only the digits 0-9 are used — there are NO letters at all. "
+                "What looks like O is the digit 0. What looks like I or L is the digit 1. "
+                "What looks like E or B is 8 or 3. What looks like S is 5. What looks like Z is 2. "
+                "Reply with ONLY the 4 digits — no letters, no spaces, no explanation."
             )},
         ]}],
     )
     raw = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-    code = re.sub(r"[^A-Z0-9]", "", raw.strip().upper())[:4]
+    # Strip everything except digits — if model still returns a letter, retry
+    code = re.sub(r"[^0-9]", "", raw.strip())[:4]
     log.debug("    Vision raw output: %r -> cleaned: %r", raw.strip(), code)
     return code
 

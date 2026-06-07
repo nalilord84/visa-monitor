@@ -545,7 +545,9 @@ def run() -> int:
                 # Check whether the site explicitly says no slots exist.
                 # "There is no availbale date." (site has a typo, match loosely)
                 body_lower = page.inner_text("body").lower()
-                if "no availa" in body_lower or "no available" in body_lower:
+                # Match the site's actual typo ("availbale") and any future correction.
+                # "no avail" is the common prefix of both spellings.
+                if "no avail" in body_lower or "there is no" in body_lower:
                     log.info("Site reports no available dates — nothing to notify.")
                 else:
                     raise RuntimeError(

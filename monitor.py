@@ -70,7 +70,8 @@ SMTP_PORT  = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER  = os.environ.get("SMTP_USER")
 SMTP_PASS  = os.environ.get("SMTP_PASS")
 EMAIL_FROM = os.environ.get("EMAIL_FROM", SMTP_USER or "")
-EMAIL_TO   = os.environ.get("EMAIL_TO")
+EMAIL_TO       = os.environ.get("EMAIL_TO")
+EMAIL_ERROR_TO = os.environ.get("EMAIL_ERROR_TO") or EMAIL_TO  # if unset, errors also go to EMAIL_TO
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -147,6 +148,8 @@ def log_config(chans):
     log.info("Headless        : %s", HEADLESS)
     log.info("Captcha retries : %d", CAPTCHA_RETRIES)
     log.info("Max jitter      : %ds", MAX_JITTER_SEC)
+    log.info("Email success→  : %s", EMAIL_TO or "(not set)")
+    log.info("Email errors→   : %s", EMAIL_ERROR_TO or "(not set)")
     log.info("Secrets present : ANTHROPIC=%s TG_TOKEN=%s TG_CHAT=%s "
              "SMTP_USER=%s SMTP_PASS=%s EMAIL_TO=%s",
              bool(ANTHROPIC_API_KEY), bool(TELEGRAM_BOT_TOKEN), bool(TELEGRAM_CHAT_ID),
@@ -176,11 +179,11 @@ def send_telegram(subject: str, body: str, image_path=None) -> None:
         raise RuntimeError(f"Telegram HTTP {r.status_code}: {r.text[:200]}")
 
 
-def send_email(subject: str, body: str, image_path=None) -> None:
+def send_email(subject: str, body: str, image_path=None, to: str = None) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM or SMTP_USER
-    msg["To"] = EMAIL_TO
+    msg["To"] = to or EMAIL_TO
     msg.set_content(body)
     if image_path and os.path.exists(image_path):
         with open(image_path, "rb") as fh:
@@ -198,13 +201,13 @@ def send_email(subject: str, body: str, image_path=None) -> None:
             s.send_message(msg)
 
 
-def notify(chans, subject, body, image_path=None) -> None:
+def notify(chans, subject, body, image_path=None, email_to: str = None) -> None:
     for ch in chans:
         try:
             if ch == "telegram":
                 send_telegram(subject, body, image_path)
             elif ch == "email":
-                send_email(subject, body, image_path)
+                send_email(subject, body, image_path, to=email_to)
             log.info("Notify: %s OK", ch)
         except Exception as e:
             log.error("Notify: %s FAILED: %s", ch, e)
@@ -327,23 +330,55 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+def fire_change(handle):
+    """Fire native + jQuery change so cascading AJAX dropdowns react."""
+    try:
+        handle.evaluate(
+            "el => { el.dispatchEvent(new Event('change', {bubbles: true}));"
+            " if (window.jQuery) { try { window.jQuery(el).trigger('change'); } catch(e){} } }"
+        )
+    except Exception:
+        pass
+
+
 def select_by_text(handle, wanted: str) -> bool:
     options = handle.eval_on_selector_all(
         "option", "els => els.map(e => e.textContent.trim()).filter(Boolean)")
     log.info("    available options: %s", options)
     w = _norm(wanted)
+    chosen, how = None, None
     for opt in options:
         if _norm(opt) == w:
-            handle.select_option(label=opt)
-            log.info("    selected (exact): %r", opt)
-            return True
-    for opt in options:
-        if w in _norm(opt):
-            handle.select_option(label=opt)
-            log.info("    selected (fuzzy '%s' -> %r)", wanted, opt)
-            return True
-    log.warning("    NO option matched %r in %s", wanted, options)
-    return False
+            chosen, how = opt, "exact"
+            break
+    if chosen is None:
+        for opt in options:
+            if w in _norm(opt):
+                chosen, how = opt, "fuzzy"
+                break
+    if chosen is None:
+        log.warning("    NO option matched %r in %s", wanted, options)
+        return False
+    handle.select_option(label=chosen)
+    fire_change(handle)  # ensure the cascade AJAX fires
+    log.info("    selected (%s): %r", how, chosen)
+    return True
+
+
+def wait_dropdown_ready(page, index, timeout_ms=10000) -> bool:
+    """Wait until the select at DOM index (excl. language) has >1 option."""
+    try:
+        page.wait_for_function(
+            f"""() => {{
+                const sel = Array.from(document.querySelectorAll('select'))
+                    .filter(s => s.id !== 'language' && s.name !== 'language');
+                return sel.length > {index} && sel[{index}].options.length > 1;
+            }}""",
+            timeout=timeout_ms,
+        )
+        return True
+    except PWTimeout:
+        return False
 
 
 def extract_dates(page):
@@ -468,24 +503,25 @@ def run() -> int:
         with step("fill dropdowns"):
             for i, (field_name, wanted) in enumerate(SELECTIONS):
                 # Dropdowns 2-6 are populated by AJAX after the previous one is
-                # selected. networkidle is unreliable — instead, wait explicitly
-                # for options.length > 1 (more than just the placeholder) before
-                # reading the dropdown.
+                # selected. If this dropdown is still empty, the previous cascade
+                # (sometimes) failed — re-fire the previous selection and wait again.
                 if i >= 1:
-                    log.info("    Waiting for dropdown %d/%d [%s] to be populated...",
+                    log.info("    Waiting for dropdown %d/%d [%s] to populate...",
                              i + 1, len(SELECTIONS), field_name)
-                    try:
-                        page.wait_for_function(
-                            f"""() => {{
-                                const sel = Array.from(document.querySelectorAll('select'))
-                                    .filter(s => s.id !== 'language' && s.name !== 'language');
-                                return sel.length > {i} && sel[{i}].options.length > 1;
-                            }}""",
-                            timeout=15000,
-                        )
+                    ready = wait_dropdown_ready(page, i, timeout_ms=10000)
+                    for retry in range(1, 4):  # up to 3 re-triggers
+                        if ready:
+                            break
+                        log.warning("    Dropdown %d empty — re-triggering previous "
+                                    "selection (retry %d/3)", i + 1, retry)
+                        prev = trip_selects(page)
+                        if i - 1 < len(prev):
+                            fire_change(prev[i - 1])
+                        ready = wait_dropdown_ready(page, i, timeout_ms=10000)
+                    if ready:
                         log.info("    Dropdown %d ready", i + 1)
-                    except PWTimeout:
-                        log.warning("    Dropdown %d did not populate within 15s; proceeding anyway", i + 1)
+                    else:
+                        log.warning("    Dropdown %d still empty after retries; proceeding", i + 1)
 
                 selects = trip_selects(page)
                 log.info("Dropdown %d/%d [%s] want=%r  (%d selects on page)",
@@ -506,15 +542,25 @@ def run() -> int:
             log.info("Parsed %d date(s): %s",
                      len(dates), [d.isoformat() for d in dates])
             if not dates:
-                raise RuntimeError(
-                    "No dates parsed. See screenshots/04_after_selections.png.")
-            earliest = dates[0]
-            log.info("Earliest: %s  |  threshold: %s",
-                     earliest.isoformat(), threshold.isoformat())
+                # Check whether the site explicitly says no slots exist.
+                # "There is no availbale date." (site has a typo, match loosely)
+                body_lower = page.inner_text("body").lower()
+                if "no availa" in body_lower or "no available" in body_lower:
+                    log.info("Site reports no available dates — nothing to notify.")
+                else:
+                    raise RuntimeError(
+                        "No dates parsed and no 'no available date' message found. "
+                        "See screenshots/04_after_selections.png.")
+            else:
+                log.info("Earliest: %s  |  threshold: %s",
+                         dates[0].isoformat(), threshold.isoformat())
 
         # ---- Stage 4: notify ----------------------------------------------- #
         with step("decide + notify"):
-            if earliest < threshold:
+            if not dates:
+                log.info("No dates available on site — no notification sent.")
+            elif dates[0] < threshold:
+                earliest = dates[0]
                 human = ", ".join(d.strftime("%d-%m-%Y") for d in dates[:6])
                 subject = "\U0001F6A8 Earlier German visa slot available!"
                 body = (f"Earliest: {earliest.strftime('%d-%m-%Y')} "
@@ -527,7 +573,7 @@ def run() -> int:
                        f"{SHOT_DIR}/04_after_selections.png")
             else:
                 log.info("Earliest (%s) is not before threshold (%s). No notification.",
-                         earliest.isoformat(), threshold.isoformat())
+                         dates[0].isoformat(), threshold.isoformat())
 
         with step("teardown"):
             ctx.close()
@@ -552,5 +598,6 @@ if __name__ == "__main__":
             chans = channels_configured()
             if chans:
                 notify(chans, "\u26A0\uFE0F visa-monitor run failed",
-                       f"Failed at step: {_CURRENT_STEP}\nError: {e}")
+                       f"Failed at step: {_CURRENT_STEP}\nError: {e}",
+                       email_to=EMAIL_ERROR_TO)
         sys.exit(0)

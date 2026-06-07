@@ -4,7 +4,7 @@ on:
   schedule:
     # Every 20 minutes. GitHub often delays scheduled runs by a few minutes,
     # which is fine here. The script adds its own random jitter on top.
-    - cron: "*/20 3-21 * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch: {}   # lets you run it manually from the Actions tab
 
 concurrency:
@@ -41,6 +41,7 @@ jobs:
           SMTP_PORT:            ${{ vars.SMTP_PORT            || '587' }}
           EMAIL_FROM:           ${{ vars.EMAIL_FROM }}
           EMAIL_TO:             ${{ vars.EMAIL_TO }}
+          EMAIL_ERROR_TO:       ${{ vars.EMAIL_ERROR_TO }}
           # Timing (set MAX_JITTER_SEC=0 to disable jitter during debugging)
           MAX_JITTER_SEC:       ${{ vars.MAX_JITTER_SEC       || '240' }}
           NAV_TIMEOUT_MS:       ${{ vars.NAV_TIMEOUT_MS       || '45000' }}
